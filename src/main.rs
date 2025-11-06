@@ -1,11 +1,16 @@
 use std::collections::HashMap;
 
 use rust_decimal::{Decimal, prelude::Zero};
+
+#[derive(Debug, PartialEq)]
 enum TxAction {
     Deposit,
     Withdraw,
     Dispute,
+    Resolve,
 }
+
+#[derive(Debug)]
 struct UserActions {
     tx_action: TxAction,
     client_id: u16,
@@ -45,7 +50,7 @@ impl UserAccount {
 
 struct PaymentEngine {
     accounts: HashMap<u16, UserAccount>,
-    actions: HashMap<u32, UserActions>,
+    actions: HashMap<u16, HashMap<u32, Vec<UserActions>>>,
 }
 
 impl PaymentEngine {
@@ -77,21 +82,58 @@ impl PaymentEngine {
             }
             TxAction::Dispute => {
                 if let Some(account) = self.accounts.get_mut(&action.client_id) {
-                    let action = match self.actions.get(&action.tx_id) {
+                    let action = match self
+                        .actions
+                        .get(&action.client_id)
+                        .and_then(|acts| acts.get(&action.tx_id))
+                    {
                         Some(act) => act,
                         None => return,
                     };
 
-                    let amount = action.amount.unwrap_or(Decimal::zero());
+                    let amount = action
+                        .last()
+                        .and_then(|action| action.amount)
+                        .unwrap_or(Decimal::zero());
                     account.available -= amount;
                     account.held += amount;
                     account.calculate_total();
                 }
             }
-            _ => {}
+            TxAction::Resolve => {
+                if let Some(account) = self.accounts.get_mut(&action.client_id) {
+                    let actions = match self
+                        .actions
+                        .get(&action.client_id)
+                        .and_then(|acts| acts.get(&action.tx_id))
+                    {
+                        Some(act) => act,
+                        None => return,
+                    };
+                    let disputed_action = actions
+                        .iter()
+                        .find(|action| action.tx_action == TxAction::Dispute);
+                    if disputed_action.is_some() {
+                        let deposit_action = actions
+                            .iter()
+                            .find(|action| action.tx_action == TxAction::Deposit);
+                        if let Some(deposit_action) = deposit_action {
+                            let amount = deposit_action.amount.unwrap_or(Decimal::zero());
+                            account.held -= amount;
+                            account.available += amount;
+                            account.calculate_total();
+                        }
+                    }
+                }
+            }
         }
 
-        self.actions.insert(action.tx_id, action);
+        self.actions
+            .entry(action.client_id)
+            .or_insert_with(HashMap::new)
+            .entry(action.tx_id)
+            .or_insert_with(Vec::new)
+            .push(action);
     }
 }
 
@@ -118,14 +160,21 @@ fn main() {
         UserActions {
             tx_action: TxAction::Dispute,
             client_id: 1,
-            tx_id: 2,
+            tx_id: 1,
+            amount: None,
+        },
+        UserActions {
+            tx_action: TxAction::Resolve,
+            client_id: 1,
+            tx_id: 1,
             amount: None,
         },
     ];
     let mut engine = PaymentEngine::new();
     for action in mock_data {
+        println!("Processing action: {:?}", action.tx_action);
         engine.process_action(action);
+        dbg!(&engine.accounts);
     }
-    dbg!(&engine.accounts);
     println!("Hello, world!");
 }
