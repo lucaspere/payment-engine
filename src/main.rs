@@ -1,15 +1,16 @@
 use std::collections::HashMap;
+
+use rust_decimal::{Decimal, prelude::Zero};
 enum TxAction {
     Deposit,
     Withdraw,
-    Trade,
-    Stake,
+    Dispute,
 }
 struct UserActions {
     tx_action: TxAction,
     client_id: u16,
     tx_id: u32,
-    amount: rust_decimal::Decimal,
+    amount: Option<rust_decimal::Decimal>,
 }
 
 #[derive(Debug)]
@@ -62,19 +63,35 @@ impl PaymentEngine {
                     .accounts
                     .entry(action.client_id)
                     .or_insert(UserAccount::new(action.client_id));
-                account.available += action.amount;
+                account.available += action.amount.unwrap_or(Decimal::zero());
                 account.calculate_total();
             }
             TxAction::Withdraw => {
                 if let Some(account) = self.accounts.get_mut(&action.client_id) {
-                    if account.available >= action.amount {
-                        account.available -= action.amount;
+                    let amount = action.amount.unwrap_or(Decimal::zero());
+                    if account.available >= amount {
+                        account.available -= amount;
                         account.calculate_total();
                     }
                 }
             }
+            TxAction::Dispute => {
+                if let Some(account) = self.accounts.get_mut(&action.client_id) {
+                    let action = match self.actions.get(&action.tx_id) {
+                        Some(act) => act,
+                        None => return,
+                    };
+
+                    let amount = action.amount.unwrap_or(Decimal::zero());
+                    account.available -= amount;
+                    account.held += amount;
+                    account.calculate_total();
+                }
+            }
             _ => {}
         }
+
+        self.actions.insert(action.tx_id, action);
     }
 }
 
@@ -84,19 +101,25 @@ fn main() {
             tx_action: TxAction::Deposit,
             client_id: 1,
             tx_id: 1,
-            amount: rust_decimal::Decimal::new(1000, 2),
+            amount: Some(Decimal::new(1000, 2)),
         },
         UserActions {
             tx_action: TxAction::Withdraw,
             client_id: 1,
             tx_id: 2,
-            amount: rust_decimal::Decimal::new(500, 2),
+            amount: Some(Decimal::new(500, 2)),
         },
         UserActions {
             tx_action: TxAction::Deposit,
             client_id: 2,
             tx_id: 3,
-            amount: rust_decimal::Decimal::new(2000, 2),
+            amount: Some(Decimal::new(2000, 2)),
+        },
+        UserActions {
+            tx_action: TxAction::Dispute,
+            client_id: 1,
+            tx_id: 2,
+            amount: None,
         },
     ];
     let mut engine = PaymentEngine::new();
