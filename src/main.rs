@@ -8,6 +8,7 @@ enum TxAction {
     Withdraw,
     Dispute,
     Resolve,
+    ChargeBack,
 }
 
 #[derive(Debug)]
@@ -37,14 +38,8 @@ impl UserAccount {
             locked: false,
         }
     }
-    pub fn calculate_available(&mut self) {
-        self.available = self.total - self.held;
-    }
     pub fn calculate_total(&mut self) {
         self.total = self.available + self.held;
-    }
-    pub fn calculate_held(&mut self) {
-        self.held = self.total - self.available;
     }
 }
 
@@ -126,6 +121,33 @@ impl PaymentEngine {
                     }
                 }
             }
+            TxAction::ChargeBack => {
+                if let Some(account) = self.accounts.get_mut(&action.client_id) {
+                    let actions = match self
+                        .actions
+                        .get(&action.client_id)
+                        .and_then(|acts| acts.get(&action.tx_id))
+                    {
+                        Some(act) => act,
+                        None => return,
+                    };
+                    let disputed_action = actions
+                        .iter()
+                        .find(|action| action.tx_action == TxAction::Dispute);
+                    if disputed_action.is_some() {
+                        let deposit_action = actions
+                            .iter()
+                            .find(|action| action.tx_action == TxAction::Deposit);
+                        if let Some(deposit_action) = deposit_action {
+                            let amount = deposit_action.amount.unwrap_or(Decimal::zero());
+                            account.held -= amount;
+                            account.available -= amount;
+                            account.calculate_total();
+                            account.locked = true;
+                        }
+                    }
+                }
+            }
         }
 
         self.actions
@@ -164,9 +186,21 @@ fn main() {
             amount: None,
         },
         UserActions {
+            tx_action: TxAction::Dispute,
+            client_id: 2,
+            tx_id: 3,
+            amount: None,
+        },
+        UserActions {
             tx_action: TxAction::Resolve,
             client_id: 1,
             tx_id: 1,
+            amount: None,
+        },
+        UserActions {
+            tx_action: TxAction::ChargeBack,
+            client_id: 2,
+            tx_id: 3,
             amount: None,
         },
     ];
