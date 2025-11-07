@@ -1,43 +1,59 @@
-use std::collections::HashMap;
-
 use rust_decimal::{Decimal, prelude::Zero};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, path::Path};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 enum TxAction {
     Deposit,
-    Withdraw,
+    Withdrawal,
     Dispute,
     Resolve,
     ChargeBack,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct UserActions {
+    #[serde(rename = "type")]
     tx_action: TxAction,
+    #[serde(rename = "client")]
     client_id: u16,
+    #[serde(rename = "tx")]
     tx_id: u32,
-    amount: Option<rust_decimal::Decimal>,
+    amount: Option<Decimal>,
 }
 
-#[derive(Debug)]
+fn serialize_to_four_places<S>(t: &Decimal, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let four_place_decimal = t.round_sf(4);
+    serializer.serialize_some(&four_place_decimal)
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct UserAccount {
     client_id: u16,
-    available: rust_decimal::Decimal,
-    held: rust_decimal::Decimal,
-    total: rust_decimal::Decimal,
+    #[serde(serialize_with = "serialize_to_four_places")]
+    available: Decimal,
+    #[serde(serialize_with = "serialize_to_four_places")]
+    held: Decimal,
+    #[serde(serialize_with = "serialize_to_four_places")]
+    total: Decimal,
     locked: bool,
 }
 
 impl UserAccount {
     pub fn new(client_id: u16) -> Self {
-        UserAccount {
+        Self {
             client_id,
-            available: rust_decimal::Decimal::new(0, 0),
-            held: rust_decimal::Decimal::new(0, 0),
-            total: rust_decimal::Decimal::new(0, 0),
+            available: Decimal::zero(),
+            held: Decimal::zero(),
+            total: Decimal::zero(),
             locked: false,
         }
     }
+
     pub fn calculate_total(&mut self) {
         self.total = self.available + self.held;
     }
@@ -50,7 +66,7 @@ struct PaymentEngine {
 
 impl PaymentEngine {
     pub fn new() -> Self {
-        PaymentEngine {
+        Self {
             accounts: HashMap::new(),
             actions: HashMap::new(),
         }
@@ -66,7 +82,7 @@ impl PaymentEngine {
                 account.available += action.amount.unwrap_or(Decimal::zero());
                 account.calculate_total();
             }
-            TxAction::Withdraw => {
+            TxAction::Withdrawal => {
                 if let Some(account) = self.accounts.get_mut(&action.client_id) {
                     let amount = action.amount.unwrap_or(Decimal::zero());
                     if account.available >= amount {
@@ -160,55 +176,25 @@ impl PaymentEngine {
 }
 
 fn main() {
-    let mock_data = vec![
-        UserActions {
-            tx_action: TxAction::Deposit,
-            client_id: 1,
-            tx_id: 1,
-            amount: Some(Decimal::new(1000, 2)),
-        },
-        UserActions {
-            tx_action: TxAction::Withdraw,
-            client_id: 1,
-            tx_id: 2,
-            amount: Some(Decimal::new(500, 2)),
-        },
-        UserActions {
-            tx_action: TxAction::Deposit,
-            client_id: 2,
-            tx_id: 3,
-            amount: Some(Decimal::new(2000, 2)),
-        },
-        UserActions {
-            tx_action: TxAction::Dispute,
-            client_id: 1,
-            tx_id: 1,
-            amount: None,
-        },
-        UserActions {
-            tx_action: TxAction::Dispute,
-            client_id: 2,
-            tx_id: 3,
-            amount: None,
-        },
-        UserActions {
-            tx_action: TxAction::Resolve,
-            client_id: 1,
-            tx_id: 1,
-            amount: None,
-        },
-        UserActions {
-            tx_action: TxAction::ChargeBack,
-            client_id: 2,
-            tx_id: 3,
-            amount: None,
-        },
-    ];
+    let file = std::env::args().nth(1).unwrap();
+    dbg!(&file);
+    let path = Path::new(&file);
+    let mut rdr = csv::ReaderBuilder::new()
+        .trim(csv::Trim::All)
+        .from_path(path)
+        .expect("Failed to open file");
     let mut engine = PaymentEngine::new();
-    for action in mock_data {
-        println!("Processing action: {:?}", action.tx_action);
-        engine.process_action(action);
-        dbg!(&engine.accounts);
+    for result in rdr.deserialize::<UserActions>() {
+        match result {
+            Ok(action) => {
+                engine.process_action(action);
+            }
+            Err(e) => eprintln!("Error reading record: {}", e),
+        }
     }
-    println!("Hello, world!");
+    let mut wtr = csv::Writer::from_writer(std::io::stdout());
+    for account in engine.accounts.values() {
+        wtr.serialize(account).expect("Failed to write account");
+    }
+    wtr.flush().expect("Failed to flush writer");
 }
