@@ -2,6 +2,7 @@ use rust_decimal::{Decimal, prelude::Zero};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod data_sinks;
 pub mod data_sources;
 
 #[derive(Debug, PartialEq, Clone, Copy, Deserialize, Serialize)]
