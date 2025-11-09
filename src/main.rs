@@ -177,7 +177,6 @@ impl PaymentEngine {
 
 fn main() {
     let file = std::env::args().nth(1).unwrap();
-    dbg!(&file);
     let path = Path::new(&file);
     let mut rdr = csv::ReaderBuilder::new()
         .trim(csv::Trim::All)
@@ -197,4 +196,257 @@ fn main() {
         wtr.serialize(account).expect("Failed to write account");
     }
     wtr.flush().expect("Failed to flush writer");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    #[test]
+    fn test_deposit_creates_account() {
+        let mut engine = PaymentEngine::new();
+        let action = UserActions {
+            tx_action: TxAction::Deposit,
+            client_id: 1,
+            tx_id: 1,
+            amount: Some(dec!(100.0)),
+        };
+        engine.process_action(action);
+
+        let account = engine.accounts.get(&1).unwrap();
+        assert_eq!(account.available, dec!(100.0));
+        assert_eq!(account.total, dec!(100.0));
+    }
+
+    #[test]
+    fn test_multiple_deposits() {
+        let mut engine = PaymentEngine::new();
+        engine.process_action(UserActions {
+            tx_action: TxAction::Deposit,
+            client_id: 1,
+            tx_id: 1,
+            amount: Some(dec!(50.0)),
+        });
+        engine.process_action(UserActions {
+            tx_action: TxAction::Deposit,
+            client_id: 1,
+            tx_id: 2,
+            amount: Some(dec!(75.5)),
+        });
+
+        let account = engine.accounts.get(&1).unwrap();
+        assert_eq!(account.available, dec!(125.5));
+        assert_eq!(account.total, dec!(125.5));
+    }
+
+    #[test]
+    fn test_withdrawal_with_sufficient_funds() {
+        let mut engine = PaymentEngine::new();
+        engine.process_action(UserActions {
+            tx_action: TxAction::Deposit,
+            client_id: 1,
+            tx_id: 1,
+            amount: Some(dec!(100.0)),
+        });
+        engine.process_action(UserActions {
+            tx_action: TxAction::Withdrawal,
+            client_id: 1,
+            tx_id: 2,
+            amount: Some(dec!(30.0)),
+        });
+
+        let account = engine.accounts.get(&1).unwrap();
+        assert_eq!(account.available, dec!(70.0));
+        assert_eq!(account.total, dec!(70.0));
+    }
+
+    #[test]
+    fn test_withdrawal_with_insufficient_funds() {
+        let mut engine = PaymentEngine::new();
+        engine.process_action(UserActions {
+            tx_action: TxAction::Deposit,
+            client_id: 1,
+            tx_id: 1,
+            amount: Some(dec!(50.0)),
+        });
+        engine.process_action(UserActions {
+            tx_action: TxAction::Withdrawal,
+            client_id: 1,
+            tx_id: 2,
+            amount: Some(dec!(100.0)),
+        });
+
+        let account = engine.accounts.get(&1).unwrap();
+        assert_eq!(account.available, dec!(50.0));
+        assert_eq!(account.total, dec!(50.0));
+    }
+
+    #[test]
+    fn test_withdrawal_nonexistent_account() {
+        let mut engine = PaymentEngine::new();
+        engine.process_action(UserActions {
+            tx_action: TxAction::Withdrawal,
+            client_id: 1,
+            tx_id: 1,
+            amount: Some(dec!(50.0)),
+        });
+
+        assert!(engine.accounts.get(&1).is_none());
+    }
+
+    #[test]
+    fn test_dispute_moves_funds_to_held() {
+        let mut engine = PaymentEngine::new();
+        engine.process_action(UserActions {
+            tx_action: TxAction::Deposit,
+            client_id: 1,
+            tx_id: 1,
+            amount: Some(dec!(100.0)),
+        });
+        engine.process_action(UserActions {
+            tx_action: TxAction::Dispute,
+            client_id: 1,
+            tx_id: 1,
+            amount: None,
+        });
+
+        let account = engine.accounts.get(&1).unwrap();
+        assert_eq!(account.available, dec!(0.0));
+        assert_eq!(account.held, dec!(100.0));
+        assert_eq!(account.total, dec!(100.0));
+    }
+
+    #[test]
+    fn test_resolve_returns_funds_to_available() {
+        let mut engine = PaymentEngine::new();
+        engine.process_action(UserActions {
+            tx_action: TxAction::Deposit,
+            client_id: 1,
+            tx_id: 1,
+            amount: Some(dec!(100.0)),
+        });
+        engine.process_action(UserActions {
+            tx_action: TxAction::Dispute,
+            client_id: 1,
+            tx_id: 1,
+            amount: None,
+        });
+        engine.process_action(UserActions {
+            tx_action: TxAction::Resolve,
+            client_id: 1,
+            tx_id: 1,
+            amount: None,
+        });
+
+        let account = engine.accounts.get(&1).unwrap();
+        assert_eq!(account.available, dec!(100.0));
+        assert_eq!(account.held, dec!(0.0));
+        assert_eq!(account.total, dec!(100.0));
+        assert!(!account.locked);
+    }
+
+    #[test]
+    fn test_chargeback_locks_account() {
+        let mut engine = PaymentEngine::new();
+        engine.process_action(UserActions {
+            tx_action: TxAction::Deposit,
+            client_id: 1,
+            tx_id: 1,
+            amount: Some(dec!(100.0)),
+        });
+        engine.process_action(UserActions {
+            tx_action: TxAction::Dispute,
+            client_id: 1,
+            tx_id: 1,
+            amount: None,
+        });
+        engine.process_action(UserActions {
+            tx_action: TxAction::ChargeBack,
+            client_id: 1,
+            tx_id: 1,
+            amount: None,
+        });
+
+        let account = engine.accounts.get(&1).unwrap();
+        assert_eq!(account.held, dec!(0.0));
+        assert_eq!(account.total, dec!(-100.0));
+        assert!(account.locked);
+    }
+
+    #[test]
+    fn test_resolve_without_dispute_does_nothing() {
+        let mut engine = PaymentEngine::new();
+        engine.process_action(UserActions {
+            tx_action: TxAction::Deposit,
+            client_id: 1,
+            tx_id: 1,
+            amount: Some(dec!(100.0)),
+        });
+        engine.process_action(UserActions {
+            tx_action: TxAction::Resolve,
+            client_id: 1,
+            tx_id: 1,
+            amount: None,
+        });
+
+        let account = engine.accounts.get(&1).unwrap();
+        assert_eq!(account.available, dec!(100.0));
+        assert_eq!(account.held, dec!(0.0));
+    }
+
+    #[test]
+    fn test_multiple_clients() {
+        let mut engine = PaymentEngine::new();
+        engine.process_action(UserActions {
+            tx_action: TxAction::Deposit,
+            client_id: 1,
+            tx_id: 1,
+            amount: Some(dec!(100.0)),
+        });
+        engine.process_action(UserActions {
+            tx_action: TxAction::Deposit,
+            client_id: 2,
+            tx_id: 2,
+            amount: Some(dec!(200.0)),
+        });
+
+        assert_eq!(engine.accounts.get(&1).unwrap().total, dec!(100.0));
+        assert_eq!(engine.accounts.get(&2).unwrap().total, dec!(200.0));
+    }
+
+    #[test]
+    fn test_deposit_with_zero_amount() {
+        let mut engine = PaymentEngine::new();
+        engine.process_action(UserActions {
+            tx_action: TxAction::Deposit,
+            client_id: 1,
+            tx_id: 1,
+            amount: Some(dec!(0.0)),
+        });
+
+        let account = engine.accounts.get(&1).unwrap();
+        assert_eq!(account.available, dec!(0.0));
+    }
+
+    #[test]
+    fn test_dispute_nonexistent_transaction() {
+        let mut engine = PaymentEngine::new();
+        engine.process_action(UserActions {
+            tx_action: TxAction::Deposit,
+            client_id: 1,
+            tx_id: 1,
+            amount: Some(dec!(100.0)),
+        });
+        engine.process_action(UserActions {
+            tx_action: TxAction::Dispute,
+            client_id: 1,
+            tx_id: 999,
+            amount: None,
+        });
+
+        let account = engine.accounts.get(&1).unwrap();
+        assert_eq!(account.available, dec!(100.0));
+        assert_eq!(account.held, dec!(0.0));
+    }
 }
