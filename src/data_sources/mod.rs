@@ -1,5 +1,4 @@
 pub mod csv;
-pub mod memory;
 
 use crate::UserTransactions;
 
