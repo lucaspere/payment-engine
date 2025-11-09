@@ -3,7 +3,7 @@ pub mod csv;
 use crate::UserTransactions;
 
 pub trait DataSource {
-    fn read_actions<'a>(
+    fn read_transactions<'a>(
         &'a mut self,
     ) -> Result<Box<dyn Iterator<Item = UserTransactions> + 'a>, Box<dyn std::error::Error>>;
 }

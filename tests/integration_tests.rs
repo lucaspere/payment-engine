@@ -9,7 +9,7 @@ fn test_transactions_csv() {
     let mut data_source = Box::new(CsvDataSource::new("test_transactions.csv".to_string()));
     let mut engine = PaymentEngine::new();
 
-    match data_source.read_actions() {
+    match data_source.read_transactions() {
         Ok(actions) => {
             for action in actions {
                 engine.process_action(action);
@@ -40,7 +40,7 @@ fn test_insufficient_funds_csv() {
     ));
     let mut engine = PaymentEngine::new();
 
-    match data_source.read_actions() {
+    match data_source.read_transactions() {
         Ok(actions) => {
             for action in actions {
                 engine.process_action(action);
@@ -62,7 +62,7 @@ fn test_dispute_csv() {
     let mut data_source = Box::new(CsvDataSource::new("test_dispute.csv".to_string()));
     let mut engine = PaymentEngine::new();
 
-    match data_source.read_actions() {
+    match data_source.read_transactions() {
         Ok(actions) => {
             for action in actions {
                 engine.process_action(action);
@@ -87,7 +87,7 @@ fn test_comprehensive_csv() {
     let mut data_source = Box::new(CsvDataSource::new("test_comprehensive.csv".to_string()));
     let mut engine = PaymentEngine::new();
 
-    match data_source.read_actions() {
+    match data_source.read_transactions() {
         Ok(actions) => {
             for action in actions {
                 engine.process_action(action);

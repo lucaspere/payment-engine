@@ -1,3 +1,5 @@
+use std::process;
+
 use payment_engine::{
     PaymentEngine,
     data_sources::{DataSource, csv::CsvDataSource},
@@ -10,7 +12,7 @@ fn main() {
 
     let mut engine = PaymentEngine::new();
 
-    match data_source.read_actions() {
+    match data_source.read_transactions() {
         Ok(actions) => {
             for action in actions {
                 engine.process_action(action);
@@ -18,7 +20,7 @@ fn main() {
         }
         Err(e) => {
             eprintln!("Failed to read data: {}", e);
-            std::process::exit(1);
+            process::exit(1);
         }
     }
 
