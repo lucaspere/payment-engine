@@ -11,7 +11,7 @@ pub enum TxType {
     Withdrawal,
     Dispute,
     Resolve,
-    ChargeBack,
+    Chargeback,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -175,7 +175,7 @@ impl PaymentEngine {
             TxType::Withdrawal => self.process_withdrawal(&action),
             TxType::Dispute => self.process_dispute(&action),
             TxType::Resolve => self.process_resolve(&action),
-            TxType::ChargeBack => self.process_chargeback(&action),
+            TxType::Chargeback => self.process_chargeback(&action),
         }
 
         self.actions
@@ -351,7 +351,7 @@ mod tests {
             amount: None,
         });
         engine.process_action(UserTransactions {
-            tx_type: TxType::ChargeBack,
+            tx_type: TxType::Chargeback,
             client_id: 1,
             tx_id: 1,
             amount: None,
