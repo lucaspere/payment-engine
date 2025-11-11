@@ -30,8 +30,8 @@ fn serialize_to_four_places<S>(t: &Decimal, serializer: S) -> Result<S::Ok, S::E
 where
     S: serde::Serializer,
 {
-    let four_place_decimal = t.round_sf(4);
-    serializer.serialize_some(&four_place_decimal)
+    let formatted = format!("{:.4}", t);
+    serializer.serialize_str(&formatted)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
