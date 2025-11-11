@@ -36,6 +36,7 @@ where
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UserAccount {
+    #[serde(rename = "client")]
     pub client_id: u16,
     #[serde(serialize_with = "serialize_to_four_places")]
     pub available: Decimal,
